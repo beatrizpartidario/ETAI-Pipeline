@@ -1,4 +1,5 @@
 # Baseline Predictive Pipeline -- ETAI
+20231631 Beatriz Partidário
 
 This is the **starting point** for your semester project: a small but *complete* predictive pipeline -- every piece a real project needs (entry point, config, data loading, preprocessing, model, evaluation), just kept as simple as possible for now.
 
@@ -9,6 +10,12 @@ assessment algorithm actually used by US courts to help inform bail and sentenci
 It has some **deliberately weak spots**. Part of your work this
 semester is finding them and making them better -- see the pipeline progress table below, which tracks what changes and why as the weeks
 go on.
+
+## Weekly results
+
+### Week 2
+Overall, logistic regression performs better than the decision tree. The decision tree achieves 82.9% accuracy on the training set but only 62.9% on the test set, which suggests overfitting. Logistic regression achieves about 67.9% accuracy on both sets, showing better generalization.
+It also performs better for class 1, with higher precision, recall, and F1-score. Although the decision tree shows a smaller difference in false positive rates between the two main racial groups, logistic regression is more reliable overall because of its stronger and more consistent performance on unseen data.
 
 ## Project structure
 
@@ -38,15 +45,6 @@ This table is updated after each practical class, so you can always see what cha
 | 2 | Introduction & baseline pipeline | Initial version: project structure, a single naive train/test split (no cross-validation), minimal preprocessing (drop rows with missing values, one-hot encode categoricals), logistic regression baseline, a first (deliberately simple) fairness check comparing our model's and COMPAS's own false-positive rate by race, train-vs-test accuracy reporting (to start spotting overfitting), and each run's full report saved automatically to `results/` |
 
 ## Environment setup
-
-You only need to do this once per machine.
-
-### macOS / Linux
-```bash
-python3 -m venv venv                 # creates an isolated Python environment in a folder called "venv"
-source venv/bin/activate             # activates it -- packages install here, not system-wide, and stay out of your other projects
-pip install -r requirements.txt      # installs the exact packages this project needs, into that environment
-```
 
 ### Windows -- PowerShell
 ```powershell
