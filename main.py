@@ -29,11 +29,10 @@ def main():
 
     X_train, X_test, y_train, y_test, extras_test = preprocess(
         df,
-        target=config["data"]["target"],
-        sensitive_attr=config["data"]["sensitive_attr"],
-        drop_columns=config["data"]["drop_columns"],
-        test_size=config["split"]["test_size"],
-        random_state=config["split"]["random_state"],
+        data_config=config["data"],
+        diagnostics_config=config["diagnostics"],
+        preprocessing_config=config["preprocessing"],
+        split_config=config["split"],
     )
 
     model = build_model(config["model"])

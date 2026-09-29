@@ -10,6 +10,9 @@ You will replace this with something better in the coming weeks.
 
 One thing that is NOT naive, on purpose: `sensitive_attr` (race) is kept out of the model's input features entirely. It's split alongside the data so it's still available afterwards -- not to train on, but to check whether the model treats different groups differently. See src/evaluate.py:fairness_report.
 """
+
+"""
+
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
@@ -42,4 +45,523 @@ def preprocess(
         X, y, extras, test_size=test_size, random_state=random_state, stratify=y
     )
 
-    return X_train, X_test, y_train, y_test, extras_test
+    return X_train, X_test, y_train, y_test, extras_test  
+
+"""
+
+import numpy as np
+import pandas as pd
+
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import (
+    OneHotEncoder,
+    OrdinalEncoder,
+    StandardScaler,
+    MinMaxScaler,
+    RobustScaler,
+)
+
+
+# Categorical Data Cleaning and Standardization
+## For each categorical column defined in the config, removes extra spaces, converts temporarily to lowercase and maps known variants to one canonical value
+
+def canonicalize_categories(
+    df: pd.DataFrame,
+    columns_and_maps: dict,
+) -> pd.DataFrame:
+
+    out = df.copy()
+
+    for column, mapping in columns_and_maps.items():
+
+        if column not in out.columns:
+            continue
+
+        normalized = (
+            out[column]
+            .astype("string")
+            .str.strip()
+            .str.lower()
+        )
+
+        out[column] = (
+            normalized
+            .map(mapping)
+            .fillna(out[column])
+        )
+
+    return out
+
+
+# Numerical Data Cleaning and Standardization
+## Checks numeric columns against validity rules from the config and turns impossible values into NaN
+
+def flag_invalid_values(
+    df: pd.DataFrame,
+    validity_rules: dict,
+) -> pd.DataFrame:
+
+    out = df.copy()
+
+    for column, rule in validity_rules.items():
+
+        if column not in out.columns:
+            continue
+
+        out[column] = pd.to_numeric(
+            out[column],
+            errors="coerce",
+        )
+
+        if "min" in rule:
+            out.loc[
+                out[column] < rule["min"],
+                column,
+            ] = np.nan
+
+        if "max" in rule:
+            out.loc[
+                out[column] > rule["max"],
+                column,
+            ] = np.nan
+
+    return out
+
+
+# Cleaning Pipeline
+## Applies placeholder cleaning, numeric conversion, validity checks, category normalization, duplicate removal and redundant-column removal
+
+def clean_dataset(
+    df: pd.DataFrame,
+    diagnostics_config: dict,
+) -> pd.DataFrame:
+
+    out = df.copy()
+
+    placeholder_tokens = set(
+        diagnostics_config.get(
+            "placeholder_tokens",
+            [],
+        )
+    )
+
+    # Placeholder values -> NaN
+    normalized_placeholders = {
+        str(token).strip().lower()
+        for token in placeholder_tokens
+    }
+
+    for column in out.columns:
+
+        normalized = (
+            out[column]
+            .astype("string")
+            .str.strip()
+            .str.lower()
+        )
+
+        placeholder_mask = normalized.isin(
+            normalized_placeholders
+        )
+
+        out.loc[
+            placeholder_mask,
+            column
+        ] = np.nan
+
+
+    # Numeric-looking columns stored as text
+    for column in diagnostics_config.get(
+        "numeric_text_columns",
+        [],
+    ):
+
+        if column not in out.columns:
+            continue
+
+        out[column] = pd.to_numeric(
+            out[column],
+            errors="coerce",
+        )
+
+
+    # Invalid values -> NaN
+    out = flag_invalid_values(
+        out,
+        diagnostics_config.get(
+            "validity_rules",
+            {},
+        ),
+    )
+
+
+    # Normalize categories
+    out = canonicalize_categories(
+        out,
+        diagnostics_config.get(
+            "canonical_categories",
+            {},
+        ),
+    )
+
+
+    # Exact duplicates
+    out = out.drop_duplicates()
+
+
+    # Duplicated IDs
+    id_column = diagnostics_config.get(
+        "id_column"
+    )
+
+    if (
+        id_column
+        and id_column in out.columns
+    ):
+
+        out = out.drop_duplicates(
+            subset=id_column,
+            keep="first",
+        )
+
+
+    # Redundant columns
+    redundant_columns = diagnostics_config.get(
+        "redundant_columns",
+        [],
+    )
+
+    out = out.drop(
+        columns=[
+            column
+            for column in redundant_columns
+            if column in out.columns
+        ]
+    )
+
+    return out
+
+
+# Missingness Indicators
+## Creates an extra binary column to preserve the information that a value was originally missing
+
+def add_missingness_indicators(
+    df: pd.DataFrame,
+    indicator_sources: list,
+) -> pd.DataFrame:
+
+    out = df.copy()
+
+    for column in indicator_sources:
+
+        if column not in out.columns:
+            continue
+
+        out[f"{column}_was_missing"] = (
+            out[column]
+            .isna()
+            .astype(int)
+        )
+
+    return out
+
+
+# Features
+## Separates the target, model features and extra columns used for evaluation but not for training
+
+def split_features_target(
+    df: pd.DataFrame,
+    data_config: dict,
+    preprocessing_config: dict,
+):
+
+    out = add_missingness_indicators(
+        df,
+        preprocessing_config.get(
+            "mnar_indicator_sources",
+            [],
+        ),
+    )
+
+    target = data_config["target"]
+    sensitive_attr = data_config["sensitive_attr"]
+
+    drop_columns = data_config.get(
+        "drop_columns",
+        [],
+    )
+
+    extras_columns = data_config.get(
+        "extras",
+        [],
+    )
+
+
+    # Target
+    y = (
+        out[target]
+        if target in out.columns
+        else None
+    )
+
+
+    # Extra columns kept for evaluation
+    existing_extras = [
+        column
+        for column in extras_columns
+        if column in out.columns
+    ]
+
+    extras = (
+        out[existing_extras].copy()
+        if existing_extras
+        else None
+    )
+
+
+    # Columns excluded from model input
+    columns_to_exclude = (
+        set(drop_columns)
+        | {target, sensitive_attr}
+    )
+
+
+    # Model features
+    feature_columns = [
+        column
+        for column in out.columns
+        if column not in columns_to_exclude
+    ]
+
+    X = out[feature_columns]
+
+    return X, y, extras
+
+
+# Encoders/Scalers
+## Defines the preprocessing options that can be selected through the config
+
+SCALERS = {
+    "none": lambda: "passthrough",
+    "standard": StandardScaler,
+    "minmax": MinMaxScaler,
+    "robust": RobustScaler,
+}
+
+
+ENCODERS = {
+
+    "onehot": lambda: OneHotEncoder(
+        handle_unknown="ignore",
+        sparse_output=False,
+    ),
+
+    "ordinal": lambda: OrdinalEncoder(
+        handle_unknown="use_encoded_value",
+        unknown_value=-1,
+    ),
+}
+
+
+# Preprocessing Function
+## Builds a leak-safe ColumnTransformer using the encoder, scaler and imputation strategies defined in the config
+
+def build_preprocessor(
+    preprocessing_config: dict,
+) -> ColumnTransformer:
+
+    numeric_features = preprocessing_config.get(
+        "numeric_features",
+        [],
+    )
+
+    categorical_features = preprocessing_config.get(
+        "categorical_features",
+        [],
+    )
+
+    indicator_sources = preprocessing_config.get(
+        "mnar_indicator_sources",
+        [],
+    )
+
+    imputation_config = preprocessing_config.get(
+        "imputation",
+        {},
+    )
+
+    encoder_name = preprocessing_config["encoder"]
+    scaler_name = preprocessing_config["scaler"]
+
+
+    if scaler_name not in SCALERS:
+        raise ValueError(
+            f"Unknown scaler '{scaler_name}'. "
+            f"Options: {list(SCALERS)}"
+        )
+
+    if encoder_name not in ENCODERS:
+        raise ValueError(
+            f"Unknown encoder '{encoder_name}'. "
+            f"Options: {list(ENCODERS)}"
+        )
+
+
+    scaler = SCALERS[scaler_name]()
+    encoder = ENCODERS[encoder_name]()
+
+
+    # Numeric preprocessing
+    numeric_pipeline = Pipeline([
+        (
+            "imputer",
+            SimpleImputer(
+                strategy=imputation_config.get(
+                    "numeric_strategy",
+                    "median",
+                )
+            ),
+        ),
+        (
+            "scaler",
+            scaler,
+        ),
+    ])
+
+
+    # Categorical preprocessing
+    categorical_pipeline = Pipeline([
+        (
+            "imputer",
+            SimpleImputer(
+                strategy=imputation_config.get(
+                    "categorical_strategy",
+                    "most_frequent",
+                )
+            ),
+        ),
+        (
+            "encoder",
+            encoder,
+        ),
+    ])
+
+
+    # Missingness indicator columns
+    indicator_columns = [
+        f"{column}_was_missing"
+        for column in indicator_sources
+    ]
+
+
+    return ColumnTransformer([
+        (
+            "numeric",
+            numeric_pipeline,
+            numeric_features,
+        ),
+        (
+            "categorical",
+            categorical_pipeline,
+            categorical_features,
+        ),
+        (
+            "indicators",
+            "passthrough",
+            indicator_columns,
+        ),
+    ])
+
+
+# Train and Test Split
+## Splits X, y and the extra evaluation columns together so all rows remain aligned
+
+def split_train_test(
+    X,
+    y,
+    extras,
+    split_config: dict,
+):
+
+    return train_test_split(
+        X,
+        y,
+        extras,
+        test_size=split_config["test_size"],
+        random_state=split_config["random_state"],
+        stratify=y,
+    )
+
+
+# Main Preprocessing Function
+## Runs the full cleaning and preprocessing flow and returns model-ready train and test data
+
+def preprocess(
+    df: pd.DataFrame,
+    data_config: dict,
+    diagnostics_config: dict,
+    preprocessing_config: dict,
+    split_config: dict,
+):
+
+    # Clean dataset
+    cleaned_df = clean_dataset(
+        df,
+        diagnostics_config,
+    )
+
+
+    # Separate features, target and extras
+    X, y, extras = split_features_target(
+        cleaned_df,
+        data_config,
+        preprocessing_config,
+    )
+
+
+    # Train/test split
+    (
+        X_train,
+        X_test,
+        y_train,
+        y_test,
+        extras_train,
+        extras_test,
+    ) = split_train_test(
+        X,
+        y,
+        extras,
+        split_config,
+    )
+
+
+    # Build preprocessing pipeline
+    preprocessor = build_preprocessor(
+        preprocessing_config
+    )
+
+
+    # Fit preprocessing only on training data
+    X_train_processed = (
+        preprocessor.fit_transform(
+            X_train
+        )
+    )
+
+    X_test_processed = (
+        preprocessor.transform(
+            X_test
+        )
+    )
+
+
+    return (
+        X_train_processed,
+        X_test_processed,
+        y_train,
+        y_test,
+        extras_test,
+    )
