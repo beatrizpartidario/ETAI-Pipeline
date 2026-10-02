@@ -1,31 +1,53 @@
 # Baseline pipeline configuration.
 # Nothing here is hardcoded in the source files below -- everything tunable lives in this one place.
 
+# Data
 
 data:
   path: "data/compas_two_year_recidivism.csv"
   target: "two_year_recid"
   sensitive_attr: "race"
-  extras: ["race", "score_text"]
-  drop_columns: ["id", "decile_score", "score_text"]
+  drop_columns:
+    - "id"
+    - "decile_score"
+    - "score_text"
 
-split:
-  test_size: 0.2
+
+# Final Test Set
+
+test_set:
+  size: 0.2
   random_state: 42
 
+
+# Cross-Validation
+
+cv:
+  n_splits: 5
+  shuffle: true
+  random_state: 42
+  scoring: "accuracy"
+  n_jobs: 1
+
+
+# Diagnostics
+
 diagnostics:
-  placeholder_tokens: ["-", "?", "n/a", "N/A", "na", "NA", ""]
+  id_column: "id"
 
   numeric_text_columns:
     - "priors_count"
     - "prior_offenses"
 
-  id_column: "id"
-
-  redundant_columns:
-    - "prior_offenses"
-    - "age_in_months"
-    - "juvenile_total"
+  placeholder_tokens:
+    - "-"
+    - "?"
+    - "n/a"
+    - "N/A"
+    - "na"
+    - "NA"
+    - ""
+    - "nan"
 
   validity_rules:
     age:
@@ -68,7 +90,18 @@ diagnostics:
       medium: "Medium"
       high: "High"
 
+  redundant_columns:
+    - "prior_offenses"
+    - "age_in_months"
+    - "juvenile_total"
+
+
+# Preprocessing
+
 preprocessing:
+  encoder: "target"
+  scaler: "robust"
+
   numeric_features:
     - "age"
     - "juv_fel_count"
@@ -85,17 +118,23 @@ preprocessing:
     - "priors_count"
     - "c_charge_degree"
 
-  encoder: "onehot"
-  scaler: "standard"
+  random_state: 42
 
   imputation:
     numeric_strategy: "median"
     categorical_strategy: "most_frequent"
 
+
+# Model
+
 model:
   type: "logistic_regression"
+
   params:
-    max_iter: 1000
+    max_iter: 2000
+
+
+# Output
 
 output:
   results_dir: "results"
