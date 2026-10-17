@@ -24,9 +24,7 @@ It also performs better for class 1, with higher precision, recall, and F1-score
 
 Compared with the previous week, both models now use 5-fold cross-validation, making the evaluation more reliable than a single train/test split. Logistic regression remained stable at about 0.67 accuracy and showed almost no overfitting, with the gap decreasing from 0.008 to 0.003. The decision tree remained around 0.61 accuracy, but its overfitting decreased substantially, with the gap falling from 0.181 to 0.085. Overall, logistic regression performed better than the decision tree this week, with higher validation accuracy (0.672 vs. 0.610) and a much smaller train-validation gap (0.003 vs. 0.085).
 
-## Week 6
-
-### Week 6 — Model Evaluation (Ensembles)
+### Week 6
 
 | Model | Default: CV mean ± std (gap) | Tuned: nested CV mean ± std (gap) | Tuning score (best trial) | Chosen hyperparameters |
 |---|---|---|---|---|
