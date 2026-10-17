@@ -49,476 +49,156 @@ def preprocess(
 
 """
 
-import pandas as pd
 import numpy as np
-
-from sklearn.model_selection import train_test_split
+import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.preprocessing import (
-    OneHotEncoder,
-    OrdinalEncoder,
-    TargetEncoder,
-    StandardScaler,
-    MinMaxScaler,
-    RobustScaler,
+    OneHotEncoder, OrdinalEncoder, TargetEncoder, StandardScaler, MinMaxScaler, RobustScaler,
 )
-
 from category_encoders import CountEncoder
 
 
-# Categorialc Data Cleaning and Standardization
-## For each categorical column defined in the config, removes extra spaces, converts temporarily to lowercase and maps known variants to one canonical value
-
-def canonicalize_categories(
-    df: pd.DataFrame,
-    columns_and_maps: dict,
-) -> pd.DataFrame:
-
-    out = df.copy()
-
-    for column, mapping in columns_and_maps.items():
-
-        if column not in out.columns:
+def flag_invalid_values(df: pd.DataFrame, rules: dict) -> pd.DataFrame:
+    report_rows = []
+    for column, bounds in rules.items():
+        if column not in df.columns:
             continue
+        numeric = pd.to_numeric(df[column], errors="coerce")
+        lower_ok = numeric >= bounds["min"] if "min" in bounds else pd.Series(True, index=numeric.index)
+        upper_ok = numeric <= bounds["max"] if "max" in bounds else pd.Series(True, index=numeric.index)
+        violations = numeric.notna() & ~(lower_ok & upper_ok)
+        report_rows.append({"column": column, "rule": bounds, "violations": int(violations.sum())})
+        df.loc[violations, column] = np.nan
+    return pd.DataFrame(report_rows)
 
-        normalized = (
-            out[column]
-            .astype("string")
-            .str.strip()
-            .str.lower()
-        )
 
-        out[column] = (
-            normalized
-            .map(mapping)
-            .fillna(out[column])
-        )
-
+def _canonicalize_categories(df: pd.DataFrame, columns_and_maps: dict, placeholder_tokens: set) -> pd.DataFrame:
+    out = df.copy()
+    for col, mapping in columns_and_maps.items():
+        if col not in out.columns:
+            continue
+        cleaned = out[col].astype(str).str.strip()
+        lowered = cleaned.str.lower()
+        out[col] = lowered.map(mapping).fillna(cleaned)
+        out.loc[out[col].astype(str).str.strip().isin(placeholder_tokens), col] = np.nan
     return out
 
 
-# Numerical Data Cleaning and Standardization
-## Checks numeric columns against validity rules from the config and turns impossible values into NaN
-
-def flag_invalid_values(
-    df: pd.DataFrame,
-    validity_rules: dict,
-) -> pd.DataFrame:
-
+def clean_dataset(df: pd.DataFrame, diagnostics_config: dict) -> pd.DataFrame:
     out = df.copy()
+    placeholder_tokens = set(diagnostics_config.get("placeholder_tokens", []))
 
-    for column, rule in validity_rules.items():
+    for col in diagnostics_config.get("numeric_text_columns", []):
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col].replace(list(placeholder_tokens), np.nan), errors="coerce")
 
-        if column not in out.columns:
-            continue
+    flag_invalid_values(out, diagnostics_config.get("validity_rules", {}))
+    out = _canonicalize_categories(out, diagnostics_config.get("canonical_categories", {}), placeholder_tokens)
 
-        out[column] = pd.to_numeric(
-            out[column],
-            errors="coerce",
-        )
-
-        if "min" in rule:
-            out.loc[
-                out[column] < rule["min"],
-                column,
-            ] = np.nan
-
-        if "max" in rule:
-            out.loc[
-                out[column] > rule["max"],
-                column,
-            ] = np.nan
-
-    return out
+    columns_to_drop = [c for c in diagnostics_config.get("redundant_columns", []) if c in out.columns]
+    return out.drop(columns=columns_to_drop)
 
 
-# Cleaning Pipeline
-## Applies placeholder cleaning, numeric conversion, validity checks, category normalization and redundant-column removal
-
-def clean_dataset(
-    df: pd.DataFrame,
-    diagnostics_config: dict,
-) -> pd.DataFrame:
-
-    out = df.copy()
-
-    placeholder_tokens = set(
-        diagnostics_config.get(
-            "placeholder_tokens",
-            [],
-        )
-    )
-
-    # Placeholder values -> NaN
-    normalized_placeholders = {
-        str(token).strip().lower()
-        for token in placeholder_tokens
-    }
-
-    for column in out.columns:
-
-        normalized = (
-            out[column]
-            .astype("string")
-            .str.strip()
-            .str.lower()
-        )
-
-        placeholder_mask = normalized.isin(
-            normalized_placeholders
-        )
-
-        out.loc[
-            placeholder_mask,
-            column,
-        ] = np.nan
-
-    # Numeric-looking columns stored as text
-    for column in diagnostics_config.get(
-        "numeric_text_columns",
-        [],
-    ):
-
-        if column not in out.columns:
-            continue
-
-        out[column] = pd.to_numeric(
-            out[column],
-            errors="coerce",
-        )
-
-    # Invalid values -> NaN
-    out = flag_invalid_values(
-        out,
-        diagnostics_config.get(
-            "validity_rules",
-            {},
-        ),
-    )
-
-    # Normalize categorical values
-    out = canonicalize_categories(
-        out,
-        diagnostics_config.get(
-            "canonical_categories",
-            {},
-        ),
-    )
-
-    # Redundant columns
-    redundant_columns = diagnostics_config.get(
-        "redundant_columns",
-        [],
-    )
-
-    out = out.drop(
-        columns=[
-            column
-            for column in redundant_columns
-            if column in out.columns
-        ]
-    )
-
-    return out
-
-
-# Duplicate Rows
-## Removes exact duplicates and repeated IDs
-
-def drop_duplicate_rows(
-    df: pd.DataFrame,
-    id_column: str | None = None,
-) -> pd.DataFrame:
-
+def drop_duplicate_rows(df: pd.DataFrame, id_column: str = None) -> pd.DataFrame:
+    """
+    Training data only, before `split_dev_test`: drops exact duplicate rows and repeated ids
+    (keeping the first). Never call it on data to predict: every row needs a prediction.
+    """
     out = df.drop_duplicates()
-
     if id_column and id_column in out.columns:
-
-        out = out.drop_duplicates(
-            subset=id_column,
-            keep="first",
-        )
-
+        out = out.drop_duplicates(subset=id_column, keep="first")
     return out
 
-# Missingness Indicators
-## Creates an extra binary column to preserve the information that a value was originally missing
 
-def add_missingness_indicators(
-    df: pd.DataFrame,
-    indicator_sources: list,
-) -> pd.DataFrame:
-
+def add_engineered_features(df: pd.DataFrame, enabled: bool = True) -> pd.DataFrame:
+    """
+    Create three new features from existing columns.
+    No information is learned from the dataset.
+    """
     out = df.copy()
 
-    for column in indicator_sources:
+    if not enabled:
+        return out
 
-        if column not in out.columns:
-            continue
+    juvenile_cols = [
+        "juv_fel_count",
+        "juv_misd_count",
+        "juv_other_count"
+    ]
 
-        out[f"{column}_was_missing"] = (
-            out[column]
-            .isna()
-            .astype(int)
-        )
+    # Total juvenile offenses
+    out["juvenile_offenses_total"] = out[juvenile_cols].sum(
+        axis=1, min_count=3
+    )
+
+    # Prior offenses relative to adult years
+    adult_years = (out["age"] - 17).clip(lower=1)
+    out["priors_per_adult_year"] = out["priors_count"] / adult_years
+
+    # Interaction between adult and juvenile offenses
+    out["adult_juvenile_interaction"] = (
+        out["priors_count"] * out["juvenile_offenses_total"]
+    )
 
     return out
 
 
-# Features
-## Separates the target, model features and extra columns used for evaluation but not for training
+def add_missingness_indicators(df: pd.DataFrame, mnar_indicator_sources: list) -> pd.DataFrame:
+    out = df.copy()
+    for col in mnar_indicator_sources:
+        if col in out.columns:
+            out[f"{col}_was_missing"] = out[col].isna().astype(int)
+    return out
 
-def split_features_target(
-    df: pd.DataFrame,
-    data_config: dict,
-    mnar_indicator_sources: list,
-):
 
-    out = add_missingness_indicators(
-        df,
-        mnar_indicator_sources,
-    )
-
+def split_features_target(df: pd.DataFrame, data_config: dict, mnar_indicator_sources: list):
     target = data_config["target"]
     sensitive_attr = data_config["sensitive_attr"]
+    drop_columns = data_config.get("drop_columns", [])
 
-    drop_columns = data_config.get(
-        "drop_columns",
-        [],
-    )
+    df = add_missingness_indicators(df, mnar_indicator_sources)
+    y = df[target] if target in df.columns else None
 
-    # Target
-    y = (
-        out[target]
-        if target in out.columns
-        else None
-    )
+    extras_cols = [c for c in [sensitive_attr, "score_text"] if c in df.columns]
+    extras = df[extras_cols].copy() if extras_cols else None
 
-    # Extra columns kept for evaluation
-    extras_columns = [
-        column
-        for column in [
-            sensitive_attr,
-            "score_text",
-        ]
-        if column in out.columns
-    ]
-
-    extras = (
-        out[extras_columns].copy()
-        if extras_columns
-        else None
-    )
-
-    # Columns excluded from model input
-    columns_to_exclude = (
-        set(drop_columns)
-        | {
-            target,
-            sensitive_attr,
-            "score_text",
-        }
-    )
-
-    # Model features
-    feature_columns = [
-        column
-        for column in out.columns
-        if column not in columns_to_exclude
-    ]
-
-    X = out[feature_columns]
-
-    return X, y, extras
+    always_drop = set(drop_columns) | {target, sensitive_attr}
+    feature_cols = [c for c in df.columns if c not in always_drop]
+    return df[feature_cols], y, extras
 
 
-# Encoders and Scalers
-## Defines the preprocessing options that can be selected through the config
-
-SCALERS = {
-
-    "none": "passthrough",
-
-    "standard": StandardScaler,
-
-    "minmax": MinMaxScaler,
-
-    "robust": RobustScaler,
+_SCALERS = {"none": "passthrough", "standard": StandardScaler, "minmax": MinMaxScaler, "robust": RobustScaler}
+_ENCODERS = {
+    "onehot": lambda seed: OneHotEncoder(handle_unknown="ignore", sparse_output=False),
+    "ordinal": lambda seed: OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1),
+    "count": lambda seed: CountEncoder(handle_unknown=0, handle_missing=0),
+    "target": lambda seed: TargetEncoder(target_type="binary", cv=StratifiedKFold(5, shuffle=True, random_state=seed)),
 }
 
+def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
+    imputation = preprocessing_config.get("imputation", {})
+    scaler_factory = _SCALERS[preprocessing_config["scaler"]]
+    scaler = scaler_factory() if callable(scaler_factory) else scaler_factory
+    encoder = _ENCODERS[preprocessing_config["encoder"]](preprocessing_config.get("random_state"))
 
-ENCODERS = {
-
-    "onehot": lambda seed: OneHotEncoder(
-        handle_unknown="ignore",
-        sparse_output=False,
-    ),
-
-    "ordinal": lambda seed: OrdinalEncoder(
-        handle_unknown="use_encoded_value",
-        unknown_value=-1,
-    ),
-
-    "count": lambda seed: CountEncoder(
-        handle_unknown=0,
-        handle_missing=0,
-    ),
-
-    "target": lambda seed: TargetEncoder(
-        target_type="binary",
-        cv=5,
-        shuffle=True,
-        random_state=seed,
-    ),
-}
-
-
-# Preprocessing Function
-
-def build_preprocessor(
-    preprocessing_config: dict,
-) -> ColumnTransformer:
-
-    # Features
-    numeric_features = preprocessing_config.get(
-        "numeric_features",
-        [],
-    )
-
-    categorical_features = preprocessing_config.get(
-        "categorical_features",
-        [],
-    )
-
-    indicator_sources = preprocessing_config.get(
-        "mnar_indicator_sources",
-        [],
-    )
-
-    # Imputation configuration
-    imputation_config = preprocessing_config.get(
-        "imputation",
-        {},
-    )
-
-    # Encoder and scaler selected in config.yaml
-    encoder_name = preprocessing_config["encoder"]
-    scaler_name = preprocessing_config["scaler"]
-
-    # Create scaler
-    scaler_factory = SCALERS[scaler_name]
-
-    scaler = (
-        scaler_factory()
-        if callable(scaler_factory)
-        else scaler_factory
-    )
-
-    # Create encoder
-    random_state = preprocessing_config.get(
-        "random_state",
-        42,
-    )
-
-    encoder = ENCODERS[encoder_name](
-        random_state
-    )
-
-    # Numeric preprocessing
     numeric_pipeline = Pipeline([
-        (
-            "imputer",
-            SimpleImputer(
-                strategy=imputation_config.get(
-                    "numeric_strategy",
-                    "median",
-                )
-            ),
-        ),
-        (
-            "scaler",
-            scaler,
-        ),
+        ("impute", SimpleImputer(strategy=imputation.get("numeric_strategy", "median"))),
+        ("scale", scaler),
     ])
-
-    # Categorical preprocessing
     categorical_pipeline = Pipeline([
-        (
-            "imputer",
-            SimpleImputer(
-                strategy=imputation_config.get(
-                    "categorical_strategy",
-                    "most_frequent",
-                )
-            ),
-        ),
-        (
-            "encoder",
-            encoder,
-        ),
+        ("impute", SimpleImputer(strategy=imputation.get("categorical_strategy", "most_frequent"))),
+        ("encode", encoder),
     ])
+    indicator_cols = [f"{c}_was_missing" for c in preprocessing_config.get("mnar_indicator_sources", [])]
 
-    # Missingness indicator columns
-    indicator_columns = [
-        f"{column}_was_missing"
-        for column in indicator_sources
-    ]
-
-    # Apply a different preprocessing pipeline to each group of columns
     return ColumnTransformer([
-        (
-            "numeric",
-            numeric_pipeline,
-            numeric_features,
-        ),
-        (
-            "categorical",
-            categorical_pipeline,
-            categorical_features,
-        ),
-        (
-            "indicators",
-            "passthrough",
-            indicator_columns,
-        ),
+        ("numeric", numeric_pipeline, preprocessing_config["numeric_features"]),
+        ("categorical", categorical_pipeline, preprocessing_config["categorical_features"]),
+        ("indicators", "passthrough", indicator_cols),
     ])
 
-
-# Test Split
-
-def split_dev_test(
-    X,
-    y,
-    extras,
-    test_size: float,
-    random_state: int,
-):
-
-    (
-        X_dev,
-        X_test,
-        y_dev,
-        y_test,
-        extras_dev,
-        extras_test,
-    ) = train_test_split(
-        X,
-        y,
-        extras,
-        test_size=test_size,
-        random_state=random_state,
-        stratify=y,
-    )
-
-    return (
-        X_dev,
-        X_test,
-        y_dev,
-        y_test,
-        extras_dev,
-        extras_test,
-    )
-
-
+def split_dev_test(X, y, extras, test_size: float, random_state: int):
+    return train_test_split(X, y, extras, test_size=test_size, random_state=random_state, stratify=y)

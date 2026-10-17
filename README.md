@@ -17,6 +17,33 @@ go on.
 Overall, logistic regression performs better than the decision tree. The decision tree achieves 82.9% accuracy on the training set but only 62.9% on the test set, which suggests overfitting. Logistic regression achieves about 67.9% accuracy on both sets, showing better generalization.
 It also performs better for class 1, with higher precision, recall, and F1-score. Although the decision tree shows a smaller difference in false positive rates between the two main racial groups, logistic regression is more reliable overall because of its stronger and more consistent performance on unseen data.
 
+### Week 3 
+
+
+### Week 4
+
+Compared with the previous week, both models now use 5-fold cross-validation, making the evaluation more reliable than a single train/test split. Logistic regression remained stable at about 0.67 accuracy and showed almost no overfitting, with the gap decreasing from 0.008 to 0.003. The decision tree remained around 0.61 accuracy, but its overfitting decreased substantially, with the gap falling from 0.181 to 0.085. Overall, logistic regression performed better than the decision tree this week, with higher validation accuracy (0.672 vs. 0.610) and a much smaller train-validation gap (0.003 vs. 0.085).
+
+## Week 6
+
+### Week 6 — Model Evaluation (Ensembles)
+
+| Model | Default: CV mean ± std (gap) | Tuned: nested CV mean ± std (gap) | Tuning score (best trial) | Chosen hyperparameters |
+|---|---|---|---|---|
+| Logistic Regression | 0.672 ± 0.013 (+0.003) | 0.674 ± 0.016 (+0.002) | 0.675 | `C=0.315` |
+| Decision Tree | 0.610 ± 0.018 (+0.085) | 0.669 ± 0.015 (+0.013) | 0.671 | `max_depth=8`, `min_samples_leaf=149`, `criterion=gini` |
+| Random Forest | 0.650 ± 0.019 (+0.082) | 0.679 ± 0.013 (+0.013) | 0.679 | `max_depth=6`, `min_samples_leaf=1`, `max_features=sqrt` |
+| Oblique Random Forest | 0.647 ± 0.011 (+0.114) | **0.681 ± 0.012 (+0.005)** | 0.681 | `max_depth=12`, `min_samples_leaf=149`, `n_components=8` |
+| AdaBoost | 0.676 ± 0.012 (+0.006) | 0.680 ± 0.013 (+0.007) | 0.682 | `max_depth=3`, `n_estimators=349`, `learning_rate=0.291` |
+
+  
+This week, I compared five models using 5-fold cross-validation and hyperparameter tuning. Oblique Random Forest achieved the highest accuracy (0.681 ± 0.012), closely followed by AdaBoost (0.680 ± 0.013) and Random Forest (0.679 ± 0.013). However, these differences are smaller than the standard deviations, so there is no clear winner.
+
+I would choose AdaBoost because it performs almost as well as the best model and has a small train-validation gap. I would report its nested CV accuracy of 0.680 ± 0.013, as this is more reliable than the tuning score.
+
+Tuning improved the tree-based models the most, especially Decision Tree (from 0.610 to 0.669). The chosen hyperparameters helped control overfitting by limiting tree complexity. Overall, more complex models did not necessarily perform better.
+
+
 ## Project structure
 
 ```

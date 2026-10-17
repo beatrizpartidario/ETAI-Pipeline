@@ -1,75 +1,35 @@
-# Baseline pipeline configuration.
-# Nothing here is hardcoded in the source files below -- everything tunable lives in this one place.
-
-# Data
-
 data:
   path: "data/compas_two_year_recidivism.csv"
   target: "two_year_recid"
-  sensitive_attr: "race"
-  drop_columns:
-    - "id"
-    - "decile_score"
-    - "score_text"
+  sensitive_attr: "race"                            # never a feature; used only for the fairness report
+  drop_columns: ["id", "decile_score", "score_text"]  # kept in the data, never used as features
 
-
-# Final Test Set
-
+# Locked test set: never used to fit, tune or choose anything. Do not change once set.
 test_set:
   size: 0.2
   random_state: 42
-
-
-# Cross-Validation
 
 cv:
   n_splits: 5
   shuffle: true
   random_state: 42
   scoring: "accuracy"
-  n_jobs: 1
-
-
-# Diagnostics
+  n_jobs: 1                                         # -1 = all CPU cores
 
 diagnostics:
   id_column: "id"
-
-  numeric_text_columns:
-    - "priors_count"
-    - "prior_offenses"
-
-  placeholder_tokens:
-    - "-"
-    - "?"
-    - "n/a"
-    - "N/A"
-    - "na"
-    - "NA"
-    - ""
-    - "nan"
-
+  numeric_text_columns: ["priors_count", "prior_offenses"]
+  # "nan" catches real NaNs turned into text by the category cleanup.
+  placeholder_tokens: ["-", "?", "n/a", "N/A", "na", "NA", "", "nan"]
   validity_rules:
-    age:
-      min: 18
-      max: 100
-
-    decile_score:
-      min: 1
-      max: 10
-
-    juv_fel_count:
-      min: 0
-
-    priors_count:
-      min: 0
-      max: 60
-
+    age: {min: 18, max: 100}
+    decile_score: {min: 1, max: 10}
+    juv_fel_count: {min: 0}
+    priors_count: {min: 0, max: 60}
   canonical_categories:
     sex:
       male: "Male"
       female: "Female"
-
     race:
       african-american: "African-American"
       african american: "African-American"
@@ -78,63 +38,74 @@ diagnostics:
       other: "Other"
       asian: "Asian"
       native american: "Native American"
-
     c_charge_degree:
       f: "F"
       felony: "F"
       m: "M"
       misdemeanor: "M"
-
     score_text:
       low: "Low"
       medium: "Medium"
       high: "High"
-
-  redundant_columns:
-    - "prior_offenses"
-    - "age_in_months"
-    - "juvenile_total"
-
-
-# Preprocessing
+  redundant_columns: ["prior_offenses", "age_in_months", "juvenile_total"]
 
 preprocessing:
-  encoder: "target"
-  scaler: "robust"
-
-  numeric_features:
-    - "age"
-    - "juv_fel_count"
-    - "juv_misd_count"
-    - "juv_other_count"
-    - "priors_count"
-
-  categorical_features:
-    - "sex"
-    - "age_cat"
-    - "c_charge_degree"
-
-  mnar_indicator_sources:
-    - "priors_count"
-    - "c_charge_degree"
-
-  random_state: 42
-
+  encoder: "target"                                 # onehot | ordinal | count | target
+  scaler: "robust"                                  # none | standard | minmax | robust
+  numeric_features: ["age", "juv_fel_count", "juv_misd_count", "juv_other_count", "priors_count"]
+  categorical_features: ["sex", "age_cat", "c_charge_degree"]
+  mnar_indicator_sources: ["priors_count", "c_charge_degree"]   # get a <col>_was_missing flag
+  random_state: 42                                  # target encoder's internal folds
   imputation:
     numeric_strategy: "median"
     categorical_strategy: "most_frequent"
 
-
-# Model
+feature_engineering:
+  enabled: false
+  numeric_features: ["juvenile_offenses_total", "priors_per_adult_year", "adult_juvenile_interaction"]
 
 model:
-  type: "logistic_regression"
-
+  type: "adaboost"     
   params:
-    max_iter: 2000
+    max_depth: 1
+    n_estimators: 200
+    learning_rate: 1.0    
+    random_state: 42
+    #n_jobs: -1
+    #max_iter: 2000     
+  # decision_tree:          {random_state: 42}
+  # logistic_regression:    {max_iter: 2000}
+  # oblique_random_forest:  {n_estimators: 200, n_components: 10, random_state: 42, n_jobs: -1}
+  # adaboost:               {max_depth: 1, n_estimators: 200, learning_rate: 1.0, random_state: 42}
+  # random_forest:          {n_estimators: 200, max_depth: 10, min_samples_leaf: 5, max_features: "sqrt", random_state: 42, n_jobs: -1}
 
-
-# Output
+tuning:
+  enabled: true
+  n_trials: 3  
+  n_splits: 5                                      
+  random_state: 42                                 
+  search_spaces:
+    logistic_regression:
+      model__C: {type: float, low: 0.01, high: 100.0, log: true}
+    decision_tree:
+      model__max_depth: {type: int, low: 1, high: 20}
+      model__min_samples_leaf: {type: int, low: 1, high: 200, log: true}
+      model__criterion: {type: categorical, choices: ["gini", "entropy"]}
+    random_forest:
+      model__max_depth: {type: int, low: 2, high: 30}
+      model__min_samples_leaf: {type: int, low: 1, high: 200, log: true}
+      model__max_features: {type: categorical, choices: ["sqrt", 0.5, 1.0]}
+    oblique_random_forest:
+      model__estimator__tree__max_depth: {type: int, low: 2, high: 30}
+      model__estimator__tree__min_samples_leaf: {type: int, low: 1, high: 200, log: true}
+      model__estimator__project__n_components: {type: int, low: 3, high: 10}   # <= number of features
+    adaboost_logistic:
+      model__n_estimators: {type: int, low: 10, high: 80}
+      model__learning_rate: {type: float, low: 0.05, high: 1.0, log: true}
+    adaboost:
+      model__estimator__max_depth: {type: int, low: 1, high: 8}
+      model__n_estimators: {type: int, low: 25, high: 400, log: true}
+      model__learning_rate: {type: float, low: 0.01, high: 1.0, log: true}
 
 output:
   results_dir: "results"
