@@ -42,6 +42,34 @@ I would choose AdaBoost because it performs almost as well as the best model and
 Tuning improved the tree-based models the most, especially Decision Tree (from 0.610 to 0.669). The chosen hyperparameters helped control overfitting by limiting tree complexity. Overall, more complex models did not necessarily perform better.
 
 
+### Week 7
+
+| Model | Default CV mean ± std (gap) | Tuned nested CV mean ± std (gap) | Tuning score | Chosen hyperparameters |
+|---|---|---|---|---|
+| Logistic Regression | 0.719 ± 0.014 (+0.002) | 0.719 ± 0.013 (+0.001) | 0.719 | `C=0.315` |
+| Gaussian Naive Bayes | 0.685 ± 0.011 (+0.002) | 0.701 ± 0.011 (+0.001) | 0.701 | `var_smoothing=0.029` |
+| Decision Tree | 0.604 ± 0.015 (+0.110) | 0.714 ± 0.013 (+0.016) | 0.716 | `max_depth=8`, `min_samples_leaf=149`, `criterion=gini` |
+| Random Forest | 0.683 ± 0.018 (+0.121) | 0.726 ± 0.015 (+0.020) | 0.726 | `max_depth=6`, `min_samples_leaf=1`, `max_features=sqrt` |
+| **Oblique Random Forest** | 0.685 ± 0.016 (+0.150) | **0.728 ± 0.012 (+0.011)** | 0.728 | `max_depth=12`, `min_samples_leaf=149`, `n_components=8` |
+| AdaBoost | 0.723 ± 0.016 (+0.005) | 0.727 ± 0.014 (+0.011) | 0.727 | `max_depth=3`, `n_estimators=349`, `learning_rate=0.291` |
+| AdaBoost + Logistic Regression | 0.696 ± 0.012 (+0.002) | 0.713 ± 0.013 (+0.000) | 0.713 | `n_estimators=61`, `learning_rate=0.300` |
+| Gradient Boosting | 0.727 ± 0.015 (+0.022) | 0.722 ± 0.015 (+0.027) | 0.722 | `n_estimators=39`, `learning_rate=0.013`, `max_depth=6`, `min_samples_leaf=18`, `subsample=0.854` |
+| HistGradientBoosting | 0.717 ± 0.020 (+0.058) | 0.721 ± 0.013 (+0.021) | 0.721 | `max_iter=39`, `learning_rate=0.013`, `max_leaf_nodes=38`, `min_samples_leaf=44`, `l2_regularization=0.090` |
+
+*All models were evaluated using 5-fold stratified cross-validation and nested CV with 3 Optuna trials. The selection metric was ROC-AUC, with target encoding and robust scaling. Engineered features were disabled and the locked test set was not evaluated.*
+
+This week, I compared nine models using ROC-AUC instead of only accuracy. Oblique Random Forest achieved the highest nested CV score (0.728 ± 0.012), followed closely by AdaBoost (0.727 ± 0.014) and Random Forest (0.726 ± 0.015). However, the differences are smaller than the standard deviations, so there is no clear winner.
+
+Tuning improved the tree-based models the most, especially Decision Tree, which increased from 0.604 to 0.714. The selected hyperparameters helped reduce overfitting by controlling tree complexity. Interestingly, Gradient Boosting performed slightly better without tuning (0.727 compared with 0.722), showing that tuning does not always improve results.
+
+For now, I would choose Oblique Random Forest because it achieved the highest nested CV ROC-AUC, although AdaBoost and Random Forest are also good alternatives. I would report 0.728 ± 0.012 rather than the tuning score alone, since nested CV provides a more reliable performance estimate. These results are still preliminary because I only used 3 Optuna trials.
+
+
+I also checked the false positive rates across racial groups. For Oblique Random Forest, the FPR was 0.30 for African-American defendants and 0.16 for Caucasian defendants, showing that differences between groups still exist.
+
+This highlights why ROC-AUC alone is not enough to evaluate a model, especially in a sensitive prediction problem such as recidivism.
+
+
 ## Project structure
 
 ```
