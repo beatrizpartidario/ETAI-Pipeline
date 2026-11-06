@@ -17,6 +17,9 @@ load config -> load and clean data -> drop duplicate rows (training only) -> fea
 -> out-of-fold classification and fairness reports -> refit on all development rows -> save the report
 """
 from datetime import datetime
+import argparse
+import shutil
+import tempfile
 
 import optuna
 import yaml
@@ -36,8 +39,8 @@ def load_config(path: str = "config.yaml") -> dict:
         return yaml.safe_load(f)
 
 
-def main():
-    config = load_config()
+def main(config_path="config.yaml"):
+    config = load_config(config_path)
     run = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_type = config["model"]["type"]
 
@@ -74,7 +77,9 @@ def main():
     if feature_enabled:
         prep_config["numeric_features"] = (prep_config["numeric_features"]
                                             + config["feature_engineering"]["numeric_features"])
-    pipeline = build_pipeline(prep_config, config["model"])
+    selection_config = config.get("feature_selection", {"enabled": False})
+    cache_dir = tempfile.mkdtemp(prefix="pipeline_cache_") if selection_config.get("enabled") else None
+    pipeline = build_pipeline(prep_config, config["model"], selection_config, memory=cache_dir)
     floor_pipeline = build_pipeline(prep_config, {"type": "dummy"})
     floor_scores, _ = cross_validate_pipeline(floor_pipeline, X_dev, y_dev, cv,
                                               {selection_metric: scorers[selection_metric]}, selection_metric, n_jobs)
@@ -96,7 +101,9 @@ def main():
         if model_type not in search_spaces:
             raise ValueError(f"tuning is enabled but config.yaml has no tuning.search_spaces for "
                              f"'{model_type}'. Add one, or set tuning.enabled: false.")
-        search_space = search_spaces[model_type]
+        search_space = dict(search_spaces[model_type])
+        if selection_config.get("enabled"):
+            search_space.update(selection_config.get("search_space", {}))
         n_trials = tuning_config["n_trials"]
         tuning_seed = tuning_config["random_state"]
         optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -129,12 +136,21 @@ def main():
     report += "\n" + fairness_report(y_dev, oof_proba, extras_dev, sensitive_attr=config["data"]["sensitive_attr"])
 
     pipeline.fit(X_dev, y_dev)
+    if selection_config.get("enabled"):
+        names = pipeline.named_steps["prep"].get_feature_names_out()
+        mask = pipeline.named_steps["select"].get_support()
+        kept = list(names[mask])
+        feature_summary = f"Features kept: {len(kept)}/{len(names)}: {kept}"
+        print("\n" + feature_summary)
+        report += "\n" + feature_summary + "\n"
     refit = f"Final model: {model_type} refit on all {len(X_dev)} development rows."
     report += "\n" + refit + "\n"
 
     row = {"run": run, "data": config["data"]["path"], "model": model_type, "tuned": tuning_enabled,
            "encoder": config["preprocessing"]["encoder"], "scaler": config["preprocessing"]["scaler"],
            "engineered_features": feature_enabled,
+           "feature_selection": selection_config.get("enabled", False),
+           "selection_min_votes": pipeline.named_steps["select"].min_votes if selection_config.get("enabled") else "",
            "params": str(config["model"].get("params")), "tuned_params": str(study.best_params) if tuning_enabled else "",
            "metric": selection_metric, "mean": final_scores["validation"].mean(),
            "std": final_scores["validation"].std(ddof=1), "untuned": untuned, "floor": floor,
@@ -150,7 +166,12 @@ def main():
 
     path = save_run(config.get("output", {}).get("results_dir", "results"), run, config, report)
     print(f"\n{refit}\nFull report (per-fold tables, tuning, confusion matrix, fairness): {path}")
+    if cache_dir:
+        shutil.rmtree(cache_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Run the ETAI pipeline")
+    parser.add_argument("--config", default="config.yaml", help="YAML configuration to run")
+    args = parser.parse_args()
+    main(args.config)

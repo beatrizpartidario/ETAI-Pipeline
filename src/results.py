@@ -34,6 +34,8 @@ def save_run(results_dir: str, run: str, config: dict, report_text: str) -> str:
         f"random_state={cv.get('random_state')}\n"
         f"Metrics: {cv['metrics']}  selection metric: {cv['selection_metric']}\n"
         f"Engineered features: {config.get('feature_engineering', {}).get('enabled', False)}\n"
+        f"Feature selection: {config.get('feature_selection', {}).get('enabled', False)} "
+        f"min_votes={config.get('feature_selection', {}).get('min_votes', 2)}\n"
         f"Tuning: {tuning_line}\n"
         f"Locked test set: size={config['test_set']['size']}  "
         f"random_state={config['test_set']['random_state']}  (not evaluated)\n"
@@ -43,5 +45,4 @@ def save_run(results_dir: str, run: str, config: dict, report_text: str) -> str:
     with open(path, "w") as f:
         f.write(header + report_text)
     return path
-
 

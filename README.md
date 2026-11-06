@@ -69,6 +69,31 @@ I also checked the false positive rates across racial groups. For Oblique Random
 
 This highlights why ROC-AUC alone is not enough to evaluate a model, especially in a sensitive prediction problem such as recidivism.
 
+### Week 8
+
+| Model | Week 7: Without FS (Nested ROC-AUC) | Week 8: With FS (Nested ROC-AUC) | Difference |
+|---|---|---|---|
+| Logistic Regression | 0.719 ± 0.013 | 0.716 ± 0.011 | -0.003 |
+| Gaussian Naive Bayes | 0.701 ± 0.011 | 0.706 ± 0.012 | +0.005 |
+| Decision Tree | 0.714 ± 0.013 | 0.714 ± 0.013 | 0.000 |
+| Random Forest | 0.726 ± 0.015 | 0.721 ± 0.011 | -0.005 |
+| Oblique Random Forest | 0.728 ± 0.012 | 0.724 ± 0.012 | -0.004 |
+| AdaBoost | 0.727 ± 0.014 | 0.724 ± 0.014 | -0.003 |
+| AdaBoost + Logistic Regression | 0.713 ± 0.013 | 0.710 ± 0.010 | -0.003 |
+| Gradient Boosting | 0.722 ± 0.015 | 0.725 ± 0.012 | +0.003 |
+| HistGradientBoosting | 0.721 ± 0.013 | 0.725 ± 0.013 | +0.004 |
+| **XGBoost** | Not tested | **0.725 ± 0.013** | Pending |
+
+*FS = Feature Selection. Results use 5-fold nested cross-validation, ROC-AUC and 3 Optuna trials. Engineered features were disabled and the test set remained untouched.*
+
+This week, I tested how feature selection affects model performance. The selector reduced the number of features from 10 to just 2: `age` and `priors_count`.
+
+The results showed that feature selection did not always improve performance. Gaussian Naive Bayes, Gradient Boosting and HistGradientBoosting improved slightly, while Random Forest, Oblique Random Forest and AdaBoost performed slightly worse. However, all these differences are smaller than the standard deviations, so I cannot conclude that feature selection significantly improves or reduces performance.
+
+XGBoost achieved a nested CV ROC-AUC of 0.725 ± 0.013 with feature selection. This is close to the best results from previous weeks, but I still need to test XGBoost without feature selection to make a direct comparison.
+
+The selected features were `age` and `priors_count`, suggesting that age and previous criminal history are important predictors of recidivism. I found it interesting that the models could achieve similar results using only two features instead of ten. So, feature selection can help simplify the pipeline without losing much predictive performance.
+
 
 ## Project structure
 
