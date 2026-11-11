@@ -95,6 +95,32 @@ XGBoost achieved a nested CV ROC-AUC of 0.725 ± 0.013 with feature selection. T
 The selected features were `age` and `priors_count`, suggesting that age and previous criminal history are important predictors of recidivism. I found it interesting that the models could achieve similar results using only two features instead of ten. So, feature selection can help simplify the pipeline without losing much predictive performance.
 
 
+### Week 9 — Option A
+
+This week, I adapted my pipeline to work with a new dataset, Adult Income, instead of only COMPAS. I challenge A.
+
+I created separate configuration files for Adult Income, adapted the data cleaning process to handle missing values represented by `?`, and updated the pipeline to generate predictions for new observations.
+
+I used XGBoost because it had already been added to the pipeline in Week 8. I also compared its performance with and without feature selection. The selected features were: `age`, `education_num`, `capital_gain`, `capital_loss`, `hours_per_week`, `v01`, `marital_status_Married-civ-spouse`, `marital_status_Never-married`, `occupation_Exec-managerial`, `relationship_Wife` (VoteSelector reduced the number of transformed features from 149 to 10).
+
+| Metric | Required | Without Feature Selection | With Feature Selection |
+|---|---|---|---|
+| ROC-AUC | >= 0.900 | **0.904 ± 0.016** | 0.904 ± 0.011 |
+| Accuracy | >= 0.855 | **0.856 ± 0.011** | 0.853 ± 0.009 |
+| F1 | >= 0.660 | **0.664 ± 0.030** | 0.655 ± 0.034 |
+| Balanced Accuracy | — | 0.766 ± 0.019 | 0.761 ± 0.024 |
+| Precision | — | 0.756 ± 0.033 | 0.745 ± 0.015 |
+| Recall | — | 0.594 ± 0.041 | 0.586 ± 0.052 |
+| Average Precision | — | 0.784 ± 0.028 | 0.784 ± 0.019 |
+| Train-validation ROC-AUC gap | — | +0.065 | +0.043 |
+| Features used | — | 149 | 10 |
+| All three targets achieved? | — | **Yes** | No |
+
+
+XGBoost without feature selection achieved all three targets: ROC-AUC of 0.904, Accuracy of 0.856 and F1 of 0.664. With feature selection, ROC-AUC remained at 0.904, but Accuracy dropped to 0.853 and F1 to 0.655, so feature selection version did not meet all the required targets.
+
+I would therefore keep XGBoost without feature selection as my final configuration for Option A.
+
 ## Project structure
 
 ```

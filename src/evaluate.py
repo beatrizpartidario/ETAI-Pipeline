@@ -3,6 +3,11 @@ Evaluation on the development set: stratified k-fold cross-validation of the who
 on several metrics, out-of-fold probabilities and reports, a fairness check and a paired
 comparison of two models. The locked test set is never used here.
 """
+"""
+Evaluation on the development set: stratified k-fold cross-validation of the whole pipeline
+on several metrics, out-of-fold probabilities and reports, a fairness check and a paired
+comparison of two models. The locked test set is never used here.
+"""
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -93,24 +98,24 @@ def oof_classification_report(y_true, oof_proba, threshold: float = 0.5) -> str:
 
 def fairness_report(y_true, oof_proba, extras: pd.DataFrame, sensitive_attr: str = "race",
                     threshold: float = 0.5) -> str:
-    """
-    False positive rate (share of people who did not reoffend but were predicted to) per
-    group of `sensitive_attr`, for the model's out-of-fold predictions and for COMPAS's own
-    score (`score_text` other than "Low" counts as predicted to reoffend), on the same rows.
-    Rows with an unknown group are reported as "unknown". A simple check, not a full audit.
-    """
-    df = extras.copy()
+    """FPR by sensitive group; compare to COMPAS score only when available."""
+    if extras is None or sensitive_attr not in extras.columns:
+        return f"Fairness report: no {sensitive_attr!r} audit column was provided."
+    df = extras.copy().reset_index(drop=True)
     df[sensitive_attr] = df[sensitive_attr].astype(object).fillna("unknown")
-    df["y_true"] = pd.Series(y_true).values
+    df["y_true"] = np.asarray(y_true)
     df["y_pred_model"] = (oof_proba >= threshold).astype(int)
-    df["y_pred_compas"] = (df["score_text"] != "Low").astype(int)
+    # COMPAS is the only dataset for which the existing score_text benchmark applies.
+    has_compas_benchmark = "score_text" in df.columns
+    if has_compas_benchmark:
+        df["y_pred_compas"] = (df["score_text"] != "Low").astype(int)
 
-    lines = [
-        f"False positive rate by {sensitive_attr} (development set, out-of-fold)",
-        "(share of people who did NOT reoffend, but were predicted to)",
-        "",
-    ]
-    for label, col in [("Our model", "y_pred_model"), ("COMPAS's own score", "y_pred_compas")]:
+    lines = [f"False positive rate by {sensitive_attr} (development set, out-of-fold)",
+             "(share of actual class 0 incorrectly predicted as class 1)", ""]
+    sources = [("Our model", "y_pred_model")]
+    if has_compas_benchmark:
+        sources.append(("COMPAS's own score", "y_pred_compas"))
+    for label, col in sources:
         lines.append(f"  {label}:")
         for group, g in df.groupby(sensitive_attr):
             negatives = g[g["y_true"] == 0]

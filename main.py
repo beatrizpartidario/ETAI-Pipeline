@@ -16,8 +16,11 @@ load config -> load and clean data -> drop duplicate rows (training only) -> fea
 -> [if tuning is enabled: nested CV of the tuning procedure, then tuning on all development rows]
 -> out-of-fold classification and fairness reports -> refit on all development rows -> save the report
 """
+
 from datetime import datetime
 import argparse
+import os
+import pandas as pd
 import shutil
 import tempfile
 
@@ -86,10 +89,10 @@ def main(config_path="config.yaml"):
     fold_scores, oof_proba = cross_validate_pipeline(pipeline, X_dev, y_dev, cv, scorers, selection_metric, n_jobs)
     floor, untuned = floor_scores["validation"].mean(), fold_scores["validation"].mean()
 
-    print("\nDefault hyperparameters (config.yaml)")
+    print(f"\nDefault hyperparameters ({config_path})")
     print(f"  {selection_metric}: {untuned:.3f} ± {fold_scores['validation'].std(ddof=1):.3f}   "
           f"train-validation gap: {fold_scores['gap'].mean():+.3f}   no-model floor: {floor:.3f}")
-    report = (f"Hyperparameters from config.yaml: {config['model'].get('params')}\n\n"
+    report = (f"Hyperparameters from {config_path}: {config['model'].get('params')}\n\n"
               + cv_report(fold_scores, metrics, selection_metric, "Cross-validation")
               + f"\n\nNo-model floor (dummy, same folds): {selection_metric} = {floor:.3f}")
     final_scores = fold_scores
@@ -136,6 +139,35 @@ def main(config_path="config.yaml"):
     report += "\n" + fairness_report(y_dev, oof_proba, extras_dev, sensitive_attr=config["data"]["sensitive_attr"])
 
     pipeline.fit(X_dev, y_dev)
+    # Option A: score all label-free rows with the SAME fitted preprocessing/model.
+    prediction_config = config.get("prediction", {})
+    if prediction_config.get("path"):
+        new_raw = load_data(prediction_config["path"])
+        new_clean = clean_dataset(new_raw, config["diagnostics"])
+        new_clean = add_engineered_features(new_clean, enabled=feature_enabled)
+        id_col = config["diagnostics"].get("id_column", "id")
+        if id_col not in new_clean.columns:
+            raise ValueError(f"Prediction input is missing ID column {id_col!r}")
+        if config["data"]["target"] in new_clean.columns:
+            raise ValueError("Prediction input must not contain the target column")
+        X_new, new_y, _ = split_features_target(new_clean, config["data"], mnar_sources)
+        # Fail on unexpected columns instead of silently dropping them.
+        if set(X_new.columns) != set(X_dev.columns):
+            raise ValueError(f"Prediction feature mismatch: missing={set(X_dev.columns)-set(X_new.columns)}, "
+                             f"extra={set(X_new.columns)-set(X_dev.columns)}")
+        X_new = X_new.loc[:, X_dev.columns]
+        proba = pipeline.predict_proba(X_new)[:, 1]
+        prediction_threshold = prediction_config.get("threshold", 0.5)
+        output_path = prediction_config.get("output", "results/adult_predictions.csv")
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+        predictions = pd.DataFrame({id_col: new_clean[id_col].to_numpy(),
+                                    "probability": proba,
+                                    "prediction": (proba >= prediction_threshold).astype(int)})
+        assert len(predictions) == len(new_raw), "Predictions must preserve every input row"
+        predictions.to_csv(output_path, index=False)
+        print(f"\nPredictions: {len(predictions)} rows written to {output_path}")
+        report += f"\nPredictions: {len(predictions)} rows written to {output_path}\n"
+
     if selection_config.get("enabled"):
         names = pipeline.named_steps["prep"].get_feature_names_out()
         mask = pipeline.named_steps["select"].get_support()
@@ -172,6 +204,9 @@ def main(config_path="config.yaml"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the ETAI pipeline")
-    parser.add_argument("--config", default="config.yaml", help="YAML configuration to run")
+    parser.add_argument("config_path", nargs="?", default=None,
+                        help="Optional config path, e.g. config_adult.yaml")
+    parser.add_argument("--config", default=None, help="YAML configuration to run")
     args = parser.parse_args()
-    main(args.config)
+    main(args.config or args.config_path or "config.yaml")
+
