@@ -19,6 +19,7 @@ load config -> load and clean data -> drop duplicate rows (training only) -> fea
 
 from datetime import datetime
 import argparse
+import joblib
 import os
 import pandas as pd
 import shutil
@@ -46,6 +47,8 @@ def main(config_path="config.yaml"):
     config = load_config(config_path)
     run = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_type = config["model"]["type"]
+    numeric_imputer = config["preprocessing"].get("imputation", {}).get("numeric_strategy", "median")
+    print(f"Numeric imputer: {numeric_imputer}")
 
     df_raw = load_data(config["data"]["path"])
     df_clean = clean_dataset(df_raw, config["diagnostics"])
@@ -140,6 +143,9 @@ def main(config_path="config.yaml"):
 
     pipeline.fit(X_dev, y_dev)
     # Option A: score all label-free rows with the SAME fitted preprocessing/model.
+    model_path = config.get("output", {}).get("model_path", "models/model.joblib")
+    os.makedirs(os.path.dirname(model_path) or ".", exist_ok=True)
+    joblib.dump(pipeline, model_path)
     prediction_config = config.get("prediction", {})
     if prediction_config.get("path"):
         new_raw = load_data(prediction_config["path"])
@@ -175,11 +181,21 @@ def main(config_path="config.yaml"):
         feature_summary = f"Features kept: {len(kept)}/{len(names)}: {kept}"
         print("\n" + feature_summary)
         report += "\n" + feature_summary + "\n"
+    # The final fitted pipeline: what predict.py loads to predict new data.
+    # Avoid overwriting the COMPAS deployment model when running the Adult configuration.
+    model_path = config.get("output", {}).get("model_path", "models/model.joblib")
+    os.makedirs(os.path.dirname(model_path) or ".", exist_ok=True)
+    pipeline.set_params(memory=None)                # the cache folder was deleted; the saved model doesn't need it
+    joblib.dump(pipeline, model_path)
+    print(f"Saved fitted pipeline: {model_path}")
+    report += f"\nSaved fitted pipeline: {model_path}\n"
+
     refit = f"Final model: {model_type} refit on all {len(X_dev)} development rows."
     report += "\n" + refit + "\n"
 
     row = {"run": run, "data": config["data"]["path"], "model": model_type, "tuned": tuning_enabled,
            "encoder": config["preprocessing"]["encoder"], "scaler": config["preprocessing"]["scaler"],
+           "imputer": numeric_imputer,
            "engineered_features": feature_enabled,
            "feature_selection": selection_config.get("enabled", False),
            "selection_min_votes": pipeline.named_steps["select"].min_votes if selection_config.get("enabled") else "",
@@ -209,4 +225,3 @@ if __name__ == "__main__":
     parser.add_argument("--config", default=None, help="YAML configuration to run")
     args = parser.parse_args()
     main(args.config or args.config_path or "config.yaml")
-

@@ -121,6 +121,21 @@ XGBoost without feature selection achieved all three targets: ROC-AUC of 0.904, 
 
 I would therefore keep XGBoost without feature selection as my final configuration for Option A.
 
+### Week 10
+
+This week, I added different imputation methods to the pipeline and implemented model deployment using `joblib` (the saved file includes preprocessing, imputation, feature selection and the classifier). I compared four numerical imputers: Median, KNN, Iterative and Random Forest. I also created `predict.py` to load the saved pipeline and make predictions for 20 new COMPAS observations without retraining.
+
+| Imputer | ROC-AUC (mean ± std) | Difference vs. Median | Corrected p-value |
+|---|---|---|---|
+| Median | 0.721 ± 0.013 | — | — |
+| KNN | 0.717 ± 0.013 | -0.0037 | 0.0611 |
+| Iterative | 0.721 ± 0.014 | +0.0001 | 0.9481 |
+| Random Forest | 0.721 ± 0.013 | +0.0002 | 0.8154 |
+
+Random Forest achieved the highest ROC-AUC, but the difference compared with Median was very small. All corrected p-values were above 0.05, so none of the alternative imputers showed a statistically significant improvement over Median.
+
+I decided to keep **Median Imputer** because it is simpler, faster and achieved almost the same performance as the more complex methods. Therefore, more complex imputation methods do not necessarily improve model performance.
+
 ## Project structure
 
 ```
