@@ -15,7 +15,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.random_projection import SparseRandomProjection
 from sklearn.tree import DecisionTreeClassifier
 
-from src.preprocessing import build_preprocessor
+from src.preprocessing import AnomalyScore, build_preprocessor
 
 
 def adaboost(max_depth: int = 1, **params):
@@ -103,16 +103,22 @@ class VoteSelector(SelectorMixin, BaseEstimator):
         return self.support_
 
 def build_pipeline(preprocessing_config: dict, model_config: dict, selection_config: dict = None,
-                   memory=None) -> Pipeline:
+                   memory=None, anomaly_config: dict = None) -> Pipeline:
     """
-    The estimator that is cross-validated, tuned and refit: preprocessing, feature selection
-    (if `selection_config["enabled"]`) and model as one Pipeline, so every learned step is
-    re-fit on the training part of each fold. Step names address hyperparameters from outside
-    (`model__max_depth`, `select__min_votes`). `memory` (a folder) caches the fitted
-    preprocessing and selection steps: a fit on the same rows with the same settings is
-    reused instead of repeated, so tuning the model doesn't refit them in every trial.
+    The estimator that is cross-validated, tuned and refit: preprocessing, the anomaly score
+    (if `anomaly_config["method"]` is not "none"), feature selection (if
+    `selection_config["enabled"]`) and model as one Pipeline, so every learned step is re-fit
+    on the training part of each fold. Step names address hyperparameters from outside
+    (`model__max_depth`, `select__min_votes`, `anomaly__n_neighbors`). `memory` (a folder)
+    caches the fitted preprocessing, anomaly and selection steps: a fit on the same rows with
+    the same settings is reused instead of repeated, so tuning the model doesn't refit them in
+    every trial.
     """
     steps = [("prep", build_preprocessor(preprocessing_config))]
+    if anomaly_config and anomaly_config.get("method", "none") != "none":
+        steps.append(("anomaly", AnomalyScore(method=anomaly_config["method"],
+                                              n_neighbors=anomaly_config.get("n_neighbors", 20),
+                                              random_state=anomaly_config.get("random_state"))))
     if selection_config and selection_config.get("enabled", False):
         steps.append(("select", VoteSelector(min_votes=selection_config.get("min_votes", 2),
                                              random_state=selection_config.get("random_state"))))

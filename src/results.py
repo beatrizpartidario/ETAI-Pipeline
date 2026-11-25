@@ -35,6 +35,8 @@ def save_run(results_dir: str, run: str, config: dict, report_text: str) -> str:
         f"random_state={cv.get('random_state')}\n"
         f"Metrics: {cv['metrics']}  selection metric: {cv['selection_metric']}\n"
         f"Engineered features: {config.get('feature_engineering', {}).get('enabled', False)}\n"
+        f"Anomaly score: {config.get('anomaly', {}).get('method', 'none')} "
+        f"n_neighbors={config.get('anomaly', {}).get('n_neighbors', 20)}\n"
         f"Feature selection: {config.get('feature_selection', {}).get('enabled', False)} "
         f"min_votes={config.get('feature_selection', {}).get('min_votes', 2)}\n"
         f"Tuning: {tuning_line}\n"
@@ -46,4 +48,3 @@ def save_run(results_dir: str, run: str, config: dict, report_text: str) -> str:
     with open(path, "w") as f:
         f.write(header + report_text)
     return path
-

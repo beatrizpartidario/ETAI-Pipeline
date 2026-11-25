@@ -136,6 +136,30 @@ Random Forest achieved the highest ROC-AUC, but the difference compared with Med
 
 I decided to keep **Median Imputer** because it is simpler, faster and achieved almost the same performance as the more complex methods. Therefore, more complex imputation methods do not necessarily improve model performance.
 
+
+### Week 11
+
+This week, I added anomaly detection to the pipeline using Isolation Forest and Local Outlier Factor (LOF). Instead of removing unusual observations, I used the anomaly score as an additional feature for XGBoost. I compared three configurations: no anomaly detection, Isolation Forest and LOF.
+
+| Method | ROC-AUC (mean ± std) | Difference vs. None | Corrected p-value |
+|---|---|---|---|
+| **None** | **0.721 ± 0.013** | — | — |
+| Isolation Forest | 0.713 ± 0.011 | -0.0077 | 0.3159 |
+| LOF | 0.715 ± 0.015 | -0.0062 | 0.1541 |
+
+Neither anomaly detection method improved ROC-AUC compared with the baseline. Both corrected p-values were above 0.05, so the observed differences were not statistically significant.
+
+Do Anomalous People Reoffend More Often?
+
+| Method | Top 5% Recidivism | Remaining 95% | Difference |
+|---|---|---|---|
+| Isolation Forest | 58.48% | 44.36% | +14.11 pp |
+| LOF | 51.56% | 44.73% | +6.83 pp |
+
+Both methods identified groups with higher recidivism rates. Isolation Forest showed the largest difference, with 58.48% of the most anomalous individuals reoffending, compared with 44.36% of the remaining individuals. So, unusual observations are associated with a higher risk of recidivism.
+
+I decided to keep **no anomaly detection** as the preferred configuration because it achieved the highest ROC-AUC and is simpler.
+
 ## Project structure
 
 ```

@@ -91,6 +91,13 @@ model:
   # hist_gradient_boosting: {random_state: 42, class_weight: balanced}
 
 # Learned selection belongs inside every training fold, between preprocessing and the model.
+# Week 11: append an anomaly score after preprocessing, before feature selection.
+# none | isolation_forest | lof (n_neighbors must exceed the largest identical-row group)
+anomaly:
+  method: "none"
+  n_neighbors: 20
+  random_state: 42
+
 feature_selection:
   enabled: true
   min_votes: 2

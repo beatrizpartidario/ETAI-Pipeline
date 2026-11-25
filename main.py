@@ -84,8 +84,12 @@ def main(config_path="config.yaml"):
         prep_config["numeric_features"] = (prep_config["numeric_features"]
                                             + config["feature_engineering"]["numeric_features"])
     selection_config = config.get("feature_selection", {"enabled": False})
-    cache_dir = tempfile.mkdtemp(prefix="pipeline_cache_") if selection_config.get("enabled") else None
-    pipeline = build_pipeline(prep_config, config["model"], selection_config, memory=cache_dir)
+    anomaly_config = config.get("anomaly", {"method": "none"})
+    anomaly_method = anomaly_config.get("method", "none")
+    cache_dir = tempfile.mkdtemp(prefix="pipeline_cache_") if (selection_config.get("enabled") or anomaly_method != "none") else None
+    pipeline = build_pipeline(prep_config, config["model"], selection_config, memory=cache_dir,
+                              anomaly_config=anomaly_config)
+    print(f"Anomaly score: {anomaly_method}")
     floor_pipeline = build_pipeline(prep_config, {"type": "dummy"})
     floor_scores, _ = cross_validate_pipeline(floor_pipeline, X_dev, y_dev, cv,
                                               {selection_metric: scorers[selection_metric]}, selection_metric, n_jobs)
@@ -143,9 +147,6 @@ def main(config_path="config.yaml"):
 
     pipeline.fit(X_dev, y_dev)
     # Option A: score all label-free rows with the SAME fitted preprocessing/model.
-    model_path = config.get("output", {}).get("model_path", "models/model.joblib")
-    os.makedirs(os.path.dirname(model_path) or ".", exist_ok=True)
-    joblib.dump(pipeline, model_path)
     prediction_config = config.get("prediction", {})
     if prediction_config.get("path"):
         new_raw = load_data(prediction_config["path"])
@@ -176,6 +177,8 @@ def main(config_path="config.yaml"):
 
     if selection_config.get("enabled"):
         names = pipeline.named_steps["prep"].get_feature_names_out()
+        if "anomaly" in pipeline.named_steps:
+            names = pipeline.named_steps["anomaly"].get_feature_names_out(names)
         mask = pipeline.named_steps["select"].get_support()
         kept = list(names[mask])
         feature_summary = f"Features kept: {len(kept)}/{len(names)}: {kept}"
@@ -196,6 +199,7 @@ def main(config_path="config.yaml"):
     row = {"run": run, "data": config["data"]["path"], "model": model_type, "tuned": tuning_enabled,
            "encoder": config["preprocessing"]["encoder"], "scaler": config["preprocessing"]["scaler"],
            "imputer": numeric_imputer,
+           "anomaly": anomaly_method,
            "engineered_features": feature_enabled,
            "feature_selection": selection_config.get("enabled", False),
            "selection_min_votes": pipeline.named_steps["select"].min_votes if selection_config.get("enabled") else "",
@@ -204,9 +208,10 @@ def main(config_path="config.yaml"):
            "std": final_scores["validation"].std(ddof=1), "untuned": untuned, "floor": floor,
            **{f"fold_{i}": score for i, score in enumerate(final_scores["validation"], start=1)}}
     runs = save_scores(config.get("output", {}).get("scoreboard", "results/runs.csv"), row)
-    same = runs[(runs["data"] == row["data"]) & (runs["metric"] == selection_metric)]
+    same = runs[(runs["data"] == row["data"]) & (runs["metric"] == selection_metric)].copy()
+    same["anomaly"] = same["anomaly"].fillna("none")
     board = (same.sort_values("mean", ascending=False)
-             [["run", "model", "tuned", "encoder", "scaler", "mean", "std", "untuned", "floor"]]
+             [["run", "model", "tuned", "encoder", "scaler", "anomaly", "mean", "std", "untuned", "floor"]]
              .rename(columns={"mean": selection_metric})
              .to_string(index=False, float_format=lambda v: f"{v:.3f}"))
     print(f"\nScoreboard (runs on the same data and metric; best first)\n{board}")
